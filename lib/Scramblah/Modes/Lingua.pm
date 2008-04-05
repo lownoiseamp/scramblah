@@ -21,18 +21,23 @@ use warnings;
 use Lingua::EN::Sentence qw( get_sentences );
 use Lingua::EN::Tagger;
 use Lingua::En::Victory;
+use Lingua::EN::Syllable qw( syllable );
 
 sub new {
     my $class = shift;
+	my $dataset = shift;
+	my $starter_text = shift;
+
     my $self = {
         'parse_s'       => \&get_sentences,
-		'tagger'		=> new Lingua::EN::Tagger,
-		'victor'		=> new Lingua::En::Victory,
+		'tagger'		=> new Lingua::EN::Tagger(),
+		'victor'		=> new Lingua::En::Victory(),
         'users'  		=> {},
-        'starter'       => 'scramble_text.single_sentences',
 		'tokens'		=> 
-    }
+    };
+
     return bless $self;
+
 }
 
 
@@ -56,3 +61,6 @@ sub quote {
 sub default {
 
 }
+
+1;
+

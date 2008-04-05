@@ -24,51 +24,67 @@ use List::Util 'shuffle';
 sub new {
 
 	my $class = shift;
+	my $dataset = shift;
 	my $starter_text = shift;
 
 	my $self = {
 		'chain'			=> new Algorithm::MarkovChain,
 		'start_tokens'	=> [],
 		'starter'		=> $starter_text,
+	};
+
+	if ($starter_text) {
+		open(IF, "< " . $self->{'starter'}) || print STDERR "starter text does not exist: $starter_text\n";
+		local $/;
+		my $t = <IF>;
+		my @tokens = split(/\s+/, $t);
+    	$self->{chain}->seed(symbols => \@tokens, longest => int(rand(15) + 10));
+		close(IF);
+		$self->{start_tokens} = \@tokens;
+	}
+
+	if ($dataset) {	
+    	$self->{chain}->seed(symbols => $dataset, longest => int(rand(15) + 10));
+		$self->{start_tokens} = $dataset;
 	}
 
 	return bless $self;
 }
 
 sub scramble {
-    my ($kernel,$sender,$who,$where,$msg, $tokens) = @_;
+    my ($self, $kernel,$sender,$who,$where,$msg, $tokens) = @_;
 
     $self->{chain} = new Algorithm::MarkovChain;
-    my @tokens_shuffled = shuffle(@tokens);
-    $chain->seed(symbols => \@tokens_shuffled, longest => int(rand(15) + 10));
+    my @tokens_shuffled = shuffle($self->{start_tokens});
+    $self->{chain}->seed(symbols => \@tokens_shuffled, longest => int(rand(15) + 10));
 
     return "";
 
 }
 
 sub reload {
-    my ($kernel,$sender,$who,$where,$msg, $tokens) = @_;
+    my ($self,$kernel,$sender,$who,$where,$msg, $tokens) = @_;
 
-    @tokens = split(/\s+/, $starter);
-    $chain->seed(symbols => \@tokens, longest => int(rand(15) + 10));
+    $self->{chain} = new Algorithm::MarkovChain;
+    $self->{chain}->seed(symbols => $self->{start_tokens}, longest => int(rand(15) + 10));
 
     return "";
 }
 
 sub smokedope {
-	my ($kernel,$sender,$who,$where,$msg,$tokens) = @_;
+	my ($self,$kernel,$sender,$who,$where,$msg,$tokens) = @_;
 	$self->{save_on_exit} = 0;
 	return "";
 }
 
 sub potfree {
-	my ($kernel,$sender,$who,$where,$msg,$tokens) = @_;
+	my ($self,$kernel,$sender,$who,$where,$msg,$tokens) = @_;
 	$self->{save_on_exit} = 1;
 	return "";
 }
 
 sub default {
-	my ($kernel,$sender,$who,$where,$msg,$tokens) = @_;
+	my ($self,$kernel,$sender,$who,$where,$msg,$tokens) = @_;
 
 	my @new = $self->{chain}->spew(
     	'length'   => rand(15) + 10,
@@ -85,9 +101,12 @@ sub default {
     $data =~ s/\s*scramblah\s*//ig;
 
 	# add it to the chains
-    @tokens = split(/\s+/, $msg);
+    my @tokens = split(/\s+/, $msg);
     $self->{chain}->seed(symbols => \@tokens, longest => 40);
 
     return "well, $who, imma guessing $data..";
 
 }
+
+1;
+
