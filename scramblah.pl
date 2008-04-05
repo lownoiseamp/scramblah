@@ -21,7 +21,10 @@ use strict;
 use warnings;
 use List::Util 'shuffle';
 use POE qw(Component::IRC);
-use lib "lib";
+
+use lib "./lib";
+use Scramblah::Modes::RMarkov;
+use Scramblah::Modes::Lingua;
 
 #===============================================================================
 # IRC params and POE IRC session
@@ -34,7 +37,7 @@ my $ircname = 'scramblah';
 
 $ircserver = 'irc.freenode.net' if (!$ircserver);
 $port = 6667 if (!$port);
-@channels = ('#boingboing') if ($#channels > 0);
+@channels = ('#scramtest') if ($#channels == 0);
 
 my $irc = POE::Component::IRC->spawn( 
       nick    => $nickname,
@@ -53,23 +56,19 @@ POE::Session->create(
 our $mode = 'markov';
 
 our $modes = {
-
 	'markov'	=> {
-		'base' => 'Scramblah::RMarkov',
 		'dispatch' => {
 			'source'	=> \&show_source,
 			'quit'		=> sub{ exit; },
 		},
-		'instance'	=> {},
+		'instance'	=> new Scramblah::Modes::RMarkov("", "scramble_text.single_sentences"),
 	},
-
 	'lingua'	=> {
-		'base' => 'Scramblah::Lingua',
 		'dispatch' => {
 			'source'	=> \&show_source,
 			'quit'		=> sub { exit; },
 		},
-		'instance'	=> {},
+		'instance'	=> new Scramblah::Modes::Lingua("", "scramble_text.single_sentences"),
 	},
 };
 
@@ -139,10 +138,10 @@ sub irc_public {
         my @tokens = split(/\s+/, $msg);
 
 		# set mode if need be
-		if (exists($modes->{lc($tokens[0]}))) {
+		if (exists($modes->{lc($tokens[0])})) {
 
 			print STDOUT "***  Changing to mode \"$tokens[0]\".\n";
-			eval { $modes->{$tokens[0]]->{'instance'} = new $modes->{'package'}(); };
+			eval { $modes->{$tokens[0]}->{'instance'} = new $modes->{'package'}(); };
 
 			if (!$@) {
 				$kernel->post($sender => privmsg => $channel => "sybil's forground personality is now " . $tokens[0] . ".  Enjoy!");
@@ -158,23 +157,25 @@ sub irc_public {
 
 			print STDOUT "***  Running local command $tokens[0]...\n";
 			$kernel->post($sender => privmsg => $channel => "rog-wilco, $who: " . $modes->{$tokens[0]}($kernel,$sender,$who,$where,$msg,\@tokens) );
-			return 1;
 
 		} else {
 			my $res = $modes->{$mode}->{'instance'}->{'default'}($kernel,$sender,$who,$where,$msg,\@tokens);
 		}
 
-        return 1;
 
     } else {
 		$kernel->post($sender => privmsg => $channel => "/me $who?...");
 		return 1;
 	}
 
-    @tokens = split(/\s+/, $msg);
-    $chain->seed(symbols => \@tokens, longest => 40);
+	# update markov
+    my @tokens = split(/\s+/, $msg);
+    $modes->{'markov'}->{'instance'}->seed(symbols => \@tokens, longest => 40);
 
-    return 0; 
+	# update lingua
+	$modes->{'lingua'}->{'instance'}->add($msg, $who, $where);
+
+    return 1;
 
 }
 
