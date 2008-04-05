@@ -1,9 +1,9 @@
 #!/usr/bin/perl 
 #===============================================================================
 #
-#         FILE:  ubot.pl
+#         FILE:  scramblah.pl
 #
-#        USAGE:  ./ubot.pl 
+#        USAGE:  ./scramblah.pl server channel[,channel,channel.channel]
 #
 #  DESCRIPTION:  
 #
@@ -11,7 +11,7 @@
 # REQUIREMENTS:  ---
 #         BUGS:  ---
 #        NOTES:  ---
-#       AUTHOR:  Star Morin (sm), <Star Morin>
+#       AUTHOR:  shift8
 #      COMPANY:  
 #      VERSION:  1.0
 #      CREATED:  03/27/2008 05:07:49 PM PDT
@@ -19,43 +19,29 @@
 #===============================================================================
 use strict;
 use warnings;
+use List::Util 'shuffle';
 use POE qw(Component::IRC);
-use Algorithm::MarkovChain;
-use Data::Dumper;
+use lib "lib";
 
-our $dispatch = {'reload'    => \&reload,
-		   		 'smokedope' => \&forget_on_exit,
-		   		 'potfree'   => \&save_on_exit,
-		         'recompute' => \&scramble,
-		   		 'dim'       => \&forget_word,
-		   		 'hype'       => \&forget_word,
-		   		 'golong'    => \&return_longest,
-		   		 'barf'      => \&dump,
-		   		 'quit'      => \sub {exit;},
-		   		 'source'    => \&show_source,
-		   		 'commands'  => \&return_cmdlist,
-};
+#===============================================================================
+# IRC params and POE IRC session
+
+my ($ircserver, $port) = split(/:/, $ARGV[0]);
+my @channels = split(/,/, $ARGV[1]);
 
 my $nickname = 'scramblah';
 my $ircname = 'scramblah';
-my $ircserver = 'irc.freenode.net';
-my $port = 6667;
-my @channels = ( '#boingboing' );
 
-our $chain = Algorithm::MarkovChain->new;
-
-our $head = int(rand(13231));
-our $starter = `cat scramble_text.single_sentences`;
-our @tokens = split(/\s+/, $starter);
-
-$chain->seed(symbols => \@tokens, longest => 10);
+$ircserver = 'irc.freenode.net' if (!$ircserver);
+$port = 6667 if (!$port);
+@channels = ('#boingboing') if ($#channels > 0);
 
 my $irc = POE::Component::IRC->spawn( 
-      nick => $nickname,
-      server => $ircserver,
-      port => $port,
+      nick    => $nickname,
+      server  => $ircserver,
+      port    => $port,
       ircname => $ircname,
-) or die "Oh noooos! $!";
+) or die "oh nos: $!";
 
 POE::Session->create(
       package_states => [
@@ -64,40 +50,52 @@ POE::Session->create(
       heap => { irc => $irc },
 );
 
-$poe_kernel->run();
+our $mode = 'markov';
 
+our $modes = {
+
+	'markov'	=> {
+		'base' => 'Scramblah::RMarkov',
+		'dispatch' => {
+			'source'	=> \&show_source,
+			'quit'		=> sub{ exit; },
+		},
+		'instance'	=> {},
+	},
+
+	'lingua'	=> {
+		'base' => 'Scramblah::Lingua',
+		'dispatch' => {
+			'source'	=> \&show_source,
+			'quit'		=> sub { exit; },
+		},
+		'instance'	=> {},
+	},
+};
+
+#===============================================================================
+# main
+
+$poe_kernel->run();
 exit 0;
 
 #===============================================================================
 # local command functions
 
-sub scramble {
-	my ($who, $msg) = @_;
-	
-}
-
-sub return_cmdlist {
-	my $who = shift;
-	my $string = "";
-
-	foreach (keys(%{$dispatch})) {
-		next if $_ eq "commands";
-		$string .= $_ . " ";
-	}
-
-	$string =~ s/\ $//g;
-	return $string;
-}
-
 sub show_source {
-
 	return "my guts are all splayed out @ " . 
-			"http://github.com/lownoiseamp/scramblah/tree/master/scrambla.pl " . 
+			"http://github.com/lownoiseamp/scramblah/tree/master/scramblah.pl " . 
 			"- bring a mop."
+}
+
+sub demand_load {
+	my ($who, $msg) = @_;
+	return 1;
 }
 
 #===============================================================================
 # functionality
+
 sub _start {
     my ($kernel,$heap) = @_[KERNEL,HEAP];
 
@@ -119,7 +117,7 @@ sub irc_001 {
 sub irc_public {
     my ($kernel,$sender,$who,$where,$msg) = @_[KERNEL,SENDER,ARG0,ARG1,ARG2];
 
-	return 0 if ($msg =~ m/(nick|slash|nick|msg|nickserv|msg|nickserv)/);
+	return 0 if ($msg =~ m/(nick|slash|nick|msg|nickserv)/);
 
     @$where == 1 or return 0; # Confuses me when a msg is to >1 channel
 
@@ -128,7 +126,7 @@ sub irc_public {
 
     my $direct = 0;
 
-    if ($msg =~ s/^scramblah[:,]\s*//i or $msg =~ s/scramblah//i) {
+    if ($msg =~ s/^scramblah[:,]\s*//i or $msg =~ s/^scramblah//i) {
         $direct = 1;
     }
 
@@ -139,33 +137,42 @@ sub irc_public {
     if ($direct) {
 
         my @tokens = split(/\s+/, $msg);
-	
-		if (exists($dispatch->{$tokens[0]})) {
-			print STDOUT "***  Running local command $tokens[0]...\n";;
-			$kernel->post($sender => privmsg => $channel => "rog-wilco, $who: " . $dispatch->{$tokens[0]}($who, $msg) );
-			return 1;
+
+		# set mode if need be
+		if (exists($modes->{lc($tokens[0]}))) {
+
+			print STDOUT "***  Changing to mode \"$tokens[0]\".\n";
+			eval { $modes->{$tokens[0]]->{'instance'} = new $modes->{'package'}(); };
+
+			if (!$@) {
+				$kernel->post($sender => privmsg => $channel => "sybil's forground personality is now " . $tokens[0] . ".  Enjoy!");
+				$mode = $tokens[0];
+			} else {
+				$kernel->post($sender => privmsg => $channel => "sybil's '" . $tokens[0] . "' personality isn't here Mrs Torrence.");
+			}
+
 		}
 
-        my @new = $chain->spew(
-            'length' => rand(15) + 10,
-            complete => [ @tokens ],
-        );
+		# check if this mode has been given a command
+		if (exists($modes->{$mode}->{'commands'}->{$tokens[0]})) {
 
-		my $data  = "";
-		foreach (@new) {
-			$data .= " " . $_;
-			last if $data =~ m/\./g;
-		} 
-	
-        $data =~ s/\s*scramblah\s*/ /ig;
-	    $kernel->post( $sender => privmsg => $channel 
-						=> "well, $who, imma guessing $data." );
+			print STDOUT "***  Running local command $tokens[0]...\n";
+			$kernel->post($sender => privmsg => $channel => "rog-wilco, $who: " . $modes->{$tokens[0]}($kernel,$sender,$who,$where,$msg,\@tokens) );
+			return 1;
+
+		} else {
+			my $res = $modes->{$mode}->{'instance'}->{'default'}($kernel,$sender,$who,$where,$msg,\@tokens);
+		}
+
         return 1;
 
-    }
+    } else {
+		$kernel->post($sender => privmsg => $channel => "/me $who?...");
+		return 1;
+	}
 
     @tokens = split(/\s+/, $msg);
-    $chain->seed(symbols => \@tokens, longest => 30);
+    $chain->seed(symbols => \@tokens, longest => 40);
 
     return 0; 
 
