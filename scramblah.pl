@@ -37,7 +37,7 @@ my $ircname = 'scramblah';
 
 $ircserver = 'irc.freenode.net' if (!$ircserver);
 $port = 6667 if (!$port);
-@channels = ('#scramtest') if ($#channels == 0);
+@channels = ('#scramtest') if (scalar(@channels) == 0);
 
 my $irc = POE::Component::IRC->spawn( 
       nick    => $nickname,
@@ -56,20 +56,8 @@ POE::Session->create(
 our $mode = 'markov';
 
 our $modes = {
-	'markov'	=> {
-		'dispatch' => {
-			'source'	=> \&show_source,
-			'quit'		=> sub{ exit; },
-		},
-		'instance'	=> new Scramblah::Modes::RMarkov("", "scramble_text.single_sentences"),
-	},
-	'lingua'	=> {
-		'dispatch' => {
-			'source'	=> \&show_source,
-			'quit'		=> sub { exit; },
-		},
-		'instance'	=> new Scramblah::Modes::Lingua("", "scramble_text.single_sentences"),
-	},
+	'markov'	=> new Scramblah::Modes::RMarkov("", "scramble_text.single_sentences"),
+	'lingua'	=> new Scramblah::Modes::Lingua("", "scramble_text.single_sentences"),
 };
 
 #===============================================================================
@@ -116,71 +104,72 @@ sub irc_001 {
 sub irc_public {
     my ($kernel,$sender,$who,$where,$msg) = @_[KERNEL,SENDER,ARG0,ARG1,ARG2];
 
-	return 0 if ($msg =~ m/(nick|slash|nick|msg|nickserv)/);
+	# skip server messages
+	return 0 if ($msg =~ m/(nick|slash|msg|nickserv)/);
 
-    @$where == 1 or return 0; # Confuses me when a msg is to >1 channel
+	# return if multiple channels at once
+    @$where == 1 or return 0;
 
     my ($nick, undef) = split(/!/, $who, 2);
     my $channel = $where->[0];
-
+	my $type = $modes->{$mode};
     my $direct = 0;
-
-    if ($msg =~ s/^scramblah[:,]\s*//i or $msg =~ s/^scramblah//i) {
-        $direct = 1;
-    }
-
-    ($who) = split(/\!/, $who);
+	my $skip_save = 0;
 
     $msg =~ s/[^A-Za-z0-9,\.\?\-_!\'\"\s]//g;
+    my @tokens = split(/\s+/, $msg);
+
+	# someone's talking to me
+    if ($msg =~ s/^scramblah[:,]\s*//i or $msg =~ s/^scramblah//i) {
+        $direct = 1;
+    	($who) = split(/\!/, $who);
+    }
 
     if ($direct) {
 
-        my @tokens = split(/\s+/, $msg);
+		if (($who eq 'shift8') && ($tokens[0] eq 'quit') {
+			$kernel->post($sender => privmsg => $channel => "ok. audi 9000!");
+			exit(0);
+		}
 
-		# set mode if need be
-		if (exists($modes->{lc($tokens[0])})) {
+		if ($tokens[0] eq 'source') {
+			$kernel->post($sender => privmsg => $channel => show_source());
+			return 1;
+		}
 
-			print STDOUT "***  Changing to mode \"$tokens[0]\".\n";
-			eval { $modes->{$tokens[0]}->{'instance'} = new $modes->{'package'}(); };
-
-			if (!$@) {
-				$kernel->post($sender => privmsg => $channel => "sybil's forground personality is now " . $tokens[0] . ".  Enjoy!");
-				$mode = $tokens[0];
+		# change mode if requested
+		if ($token[0] eq "think") {
+			if (exists($modes->{lc($tokens[1])})) {
+				print STDOUT "***  Changing to mode \"$tokens[1]\".\n";
+				$mode = $tokens[1];
+				$type = $modes->{$mode};
+				$kernel->post($sender => privmsg => $channel => "/me sybil forground personality is now '$mode',  Enjoy!");
 			} else {
-				$kernel->post($sender => privmsg => $channel => "sybil's '" . $tokens[0] . "' personality isn't here Mrs Torrence.");
+				$kernel->post($sender => privmsg => $channel => "/me sybil '$mode' personality isn't here Mrs Torrence.");
 			}
-
+			$skip_save = 1;
+			
 		}
 
-		# check if this mode has been given a command
+		# check if we've been given a direct command
 		if (exists($modes->{$mode}->{'commands'}->{$tokens[0]})) {
-
-			print STDOUT "***  Running local command $tokens[0]...\n";
-			$kernel->post($sender => privmsg => $channel => "rog-wilco, $who: " . $modes->{$tokens[0]}($kernel,$sender,$who,$where,$msg,\@tokens) );
-
+			$kernel->post($sender => privmsg => $channel => "rog-wilco, $who: " . &{$type->{$token[0]}}($kernel,$sender,$who,$where,$msg,\@tokens) );
+			$skip_save = 1;
 		} else {
-			my $res = $modes->{$mode}->{'instance'}->{'default'}($kernel,$sender,$who,$where,$msg,\@tokens);
+			$kernel->post($sender => privmsg => $channel => $type->default($kernel,$sender,$who,$where,$msg,\@tokens) );
 		}
-
-
-    } else {
-		$kernel->post($sender => privmsg => $channel => "/me $who?...");
-		return 1;
-	}
+    } 
 
 	# update markov
-    my @tokens = split(/\s+/, $msg);
-    $modes->{'markov'}->{'instance'}->seed(symbols => \@tokens, longest => 40);
+    $modes->{'markov'}->{'instance'}->seed(symbols => \@tokens, longest => 40) unless ($skip_save);
 
 	# update lingua
-	$modes->{'lingua'}->{'instance'}->add($msg, $who, $where);
+	$modes->{'lingua'}->{'instance'}->add($msg, $who, $where) unless ($skip_save);
 
     return 1;
-
 }
 
-
-# We registered for all events, this will produce some debug info.
+# We registered for all events, this will produce some debug info.c
 sub _default {
     my ($event, $args) = @_[ARG0 .. $#_];
     my @output = ( "$event: " );
@@ -194,7 +183,6 @@ sub _default {
     }
 
 	return 0 unless $output[0] =~ m/irc_snotice/g;
-
     print STDOUT join ' ', @output, "\n";
     return 0;
 }
