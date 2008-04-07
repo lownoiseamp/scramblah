@@ -31,12 +31,14 @@ sub new {
 		'chain'			=> new Algorithm::MarkovChain,
 		'start_tokens'	=> [],
 		'starter'		=> $starter_text,
+		'save' 			=> '0',
 	};
 
 	if ($starter_text) {
-		open(IF, "< " . $self->{'starter'}) || print STDERR "starter text does not exist: $starter_text\n";
+		open(IF, "< " . $self->{starter}) || print STDERR "starter text does not exist: $starter_text\n";
 		local $/;
 		my $t = <IF>;
+		$self->{raw} = $t;
 		my @tokens = split(/\s+/, $t);
     	$self->{chain}->seed(symbols => \@tokens, longest => int(rand(15) + 10));
 		close(IF);
@@ -73,13 +75,13 @@ sub reload {
 
 sub smokedope {
 	my ($self,$kernel,$sender,$who,$where,$msg,$tokens) = @_;
-	$self->{save_on_exit} = 0;
+	$self->{save} = 0;
 	return "";
 }
 
 sub potfree {
 	my ($self,$kernel,$sender,$who,$where,$msg,$tokens) = @_;
-	$self->{save_on_exit} = 1;
+	$self->{save} = 1;
 	return "";
 }
 
@@ -99,13 +101,28 @@ sub default {
 
 	$data =~ s/^\ //g;
     $data =~ s/\s*scramblah\s*//ig;
-
-	# add it to the chains
-    my @tokens = split(/\s+/, $msg);
-    $self->{chain}->seed(symbols => \@tokens, longest => 40);
+	$self->{raw} .= "$msg\n";
 
     return "well, $who, imma guessing $data..";
 
+}
+
+sub DESTROY {
+	my ($self) = shift;
+	my $file;
+
+	if ($self->{starter_text}) {
+		$file = $self->{starter_text};
+	} else {
+		$file = "scramblah.m.out";
+	}
+
+	if (open (OF, ">$file")) {
+		print OF $self->{raw};
+		close(OF);
+	} else {
+		print STDERR "error opening save file: $!";
+	}
 }
 
 1;
