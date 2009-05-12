@@ -1,4 +1,3 @@
-#
 #===============================================================================
 #
 #         FILE:  Lingua.pm
@@ -17,7 +16,10 @@
 package Scramblah::Modes::Lingua;
 
 use strict;
+no strict "vars";
 use warnings;
+use lib "../../../lib/";
+use Scramblah::Util;
 use Lingua::EN::Sentence qw( get_sentences );
 use Lingua::EN::Tagger;
 use Lingua::En::Victory;
@@ -27,48 +29,43 @@ use Data::Dumper;
 use List::Util 'shuffle';
 
 sub new {
-    my $class = shift;
-	my $dataset = shift;
-	my $starter_text = shift;
-	my $debug = shift;
+  my ($class,$debug) = @_;
 
-    my $self = {
-		'save'			=> 1,
-        'parse_s'       => \&get_sentences,
-		'tagger'		=> new Lingua::EN::Tagger(relax => 1, stem => 1, unknown_word_tag => "slang"),
-		'victor'		=> new Lingua::En::Victory(),
-		'xmlp'			=> new XML::Simple(),
-        'users'  		=> {},
-		'tokens'		=> {
-			'txt'	=> [],
-			'users'	=> [],
-			'index'	=> {},
-		},
-		'starter_text'  => $starter_text,
-		'debug'			=> $debug,
-    };
+  my $self = {
+	   'save'	 => 1,
+       'parse_s' => \&get_sentences,
+	   'tagger'	 => new Lingua::EN::Tagger(relax => 1, stem => 1),
+	   'victor'	 => new Lingua::En::Victory(),
+	   'xmlp'	 => new XML::Simple(),
+	   'util'	 => new Scramblah::Util(),
+       'users'   => {},
+	   'storage' => {},
 
-    bless $self, $class;
+	   'debug'   => $debug,
 
-	if ($starter_text) {
-		$self->load("","","","","",[undef, $starter_text]);
-	}
+       'public_commands' => {
+          'be' => &be,
+          'quote' => &quote,
+        },
+        'index' 
+  };
 
-	return $self;
+  #HASH OF words.
+  #is hash key is hash w/ keys for neighbors
+  #each neighbor is a ref and has value for distance
+  #each neighbor as count of seen;
+
+  bless $self, $class;
 }
+
 #===============================================================================
 # command handlers
 
-# default when someone talks to scramblah without explicit command
+# default
 sub default {
-	my ($self,$kernel,$sender,$who,$where,$msg,$tokens) = @_;
-	print STDERR "::default called: " . Dumper($tokens) . "\n" if $self->{debug};
+	my ($self, $who, $msg) = @_;
 
-	# add the current message.
-	$self->load($kernel,$sender,$who,$where,$msg,$tokens);
 	# parse the sentense or phrase
-	
-	# match a previous sentence with noun and verb
 	# make a match on dataset with the same
 	# randomise a response based on the inbound data
 	# -- select least-seen reponse symbols from db
@@ -77,70 +74,64 @@ sub default {
 	# return results.
 
 	# hack for now....
-	my $grammarForm = $self->genGrammaticalForm();
-	my @words = ();
+	my $grammarForm = $self->genGrammticalForm();
+	my @words;
 	my $res;
-	my $punc;
+	my @puncs;
+    my $pp = "";
 
-	foreach (@{$grammarForm}) {
-		@words = keys(%{$self->{tokens}->{index}->{$_}});
-		$res .= $words[int(rand($#words))];
+    if (($grammarForm->[0] eq 'wdt') || ($grammarForm->[0] eq 'md')
+        || ($grammarForm->[0] eq 'wp') || ($grammarForm->[0] eq 'wrd')) {
+      $pp = "?";
+    }
+
+	foreach my $tag (@{$grammarForm}) {
+        print "$tag | ";
+		@words = keys(%{$self->{storage}->{$tag}->{words}});
+		$res .= lc($words[int(rand($#words))]) . " ";
 	}
 
-	$punc = (keys(%{$self->{tokens}->{index}->{pp}}))[int(rand(scalar(%{$self->{tokens}->{pp}})))];
+    $res =~ s/\ $//;
 
-	return $res . $punc;
+	#@puncs = keys(%{$self->{storage}->{"pp"}->{words}});
+    if ($pp eq "") {
+      $pp = ".";
+    }
+	return "$who: $res" . $pp . "\n";
 }
 
-# don't save state on exit
-sub smokeDope {
-
-	my ($self) = shift;
-	$self->{save} =  0;
-	return "Uuhm, whuuUUuut? i can't remember....";
-
+# save state?
+sub save {
+	my ($self, $save) = @_;
+    return 0 unless ($save =~m/^[0,1]$/);
+	$self->{save} = $save;
+    return 1;
 }
 
-# save state one exit
-sub potFree {
-
-	my ($self) = shift;
-	$self->{save} =  1;
-	return "i have put the pipe down now.  suddenly i remember stuff! (well, dreams mostly...)";
-
-}
-
-# become a irc person (ala perlbot)
+# become an irc person (ala perlbot)
 sub be {
-	my ($self,$kernel,$sender,$who,$where,$msg,$tokens) = @_;
-	print STDERR "::be called: " . Dumper($tokens) . "\n" if $self->{debug};
-
-	# find a sentence by given user that matches the most
-	# tokens, reconstruct and return.
-
-	return "";
+	my ($self,$who) = @_;
+    #return 0 unless exists($self->{storage}->{users}->{$who});
+    #$self->{be} = $who;
+    return 1;
 }
 
-# quote a irc person with given words used or random if none
+# quote an irc person with given words used or random if none
 sub quote {
-	my ($self,$kernel,$sender,$who,$where,$msg,$tokens) = @_;
-	print STDERR "::quote called: " . Dumper($tokens) . "\n" if $self->{debug};
-
-	return "";
+	my ($self,$who, $word) = @_;
 }
 
 # fun toy for penut galley-ing a competiion
 sub wins {
 	my ($self,$kernel,$sender,$who,$where,$msg,$tokens) = @_;
-	print STDERR "::wins called: " . Dumper($tokens) . "\n" if $self->{debug};
-
-	return "";
+	$self->{util}->error("::wins called: " . Dumper($tokens) . "\n", __PACKAGE__) if $self->{debug};
+	return $self->{'victor'}->rand_exp($tokens->[1], $tokens->[2]);
 }
 
 # generate a random hiku from the text db
 sub hiku {
 	my ($self,$kernel,$sender,$who,$where,$msg,$tokens) = @_;
-	print STDERR "::hiku called: " . Dumper($tokens) . "\n" if $self->{debug};
+	$self->{util}->error("::hiku called: " . Dumper($tokens) . "\n", __PACKAGE__) if $self->{debug};
 
 	return "";
 }
@@ -150,41 +141,102 @@ sub hiku {
 
 sub dump {
 	my ($self) = shift;
-	print Dumper($self->{tokens});
+	print Dumper($self->{storage});
 	exit(0);
 }
 
-sub load {
-	my ($self,$kernel,$sender,$who,$where,$msg,$tokens) = @_;
-	print STDERR "::load called: " . Dumper($tokens) . "\n" if $self->{debug};
 
-	# is this a txt load or a irc communication?
-	my $store = "";
-	my $full_text = "";
+sub store {
+  my ($self, $who, $msg) = @_;
+  my $idx = 0;	
+  my $tt;
+  my $pt;
 
-	if (($tokens->[2]) && ($tokens->[2] eq "file")) {
+  print "store called $who : " . substr($msg, 0, 10) . "\n";
 
-		# sanitize file path
-		if (($tokens->[1] =~ m/^\//g)) {
-			return "no can do buddy-o.";
+  my $data_ref;
+  my $storage_ref;
+  my @data = $self->{'parse_s'}->($msg);
+
+#  print Dumper(\@data);
+
+  foreach my $s (@{$data[0]}) {
+
+    # clean up
+	$s =~ s/\ ?\n/\ /g;
+	$s =~ s/\ {2,}/\ /g;
+	$tt = $self->{'tagger'}->add_tags($s);
+	$pt = $self->{xmlp}->XMLin("<sentence>$tt</sentence>") || die("$s ... $!");
+    #print $s . "\n";
+	$data_ref = {'time' => time(), "sentence" => $s, 'who' => $who, 'parsed' => $pt};
+
+	foreach my $type (keys(%{$pt})) {
+	  if (ref($pt->{$type}) eq "ARRAY") {
+        for  ($idx =0,$idx <= $#{$pt->{$type}}, $idx++) {
+
+          if (ref($self->{storage}->{$type}->{words}->{$pt->{$type}->[$idx]}) ne 'ARRAY') {
+            $self->{storage}->{$type}->{words}->{$pt->{$type}->[$idx]} = [];
+          }
+          $storage_ref = $self->{storage}->{$type}->{words}->{$pt->{$type}->[$idx]};
+          
+          push(@{$storage_ref}, $data_ref)
+            unless $storage_ref->[$#{$storage_ref}] eq $data_ref;
+
+          $self->{storage}->{histo}->{$pt->{$type}->[$idx]}++;
 		}
 
-		# skip non-existant files
-		return "whatchu talking bout willis." unless (-f $tokens->[1]);
+	  } else {
+        if (ref($self->{storage}->{$type}->{words}->{$pt->{$type}}) ne 'ARRAY') {
+          $self->{storage}->{$type}->{words}->{$pt->{$type}} = [];
+        }
+        $storage_ref = $self->{storage}->{$type}->{words}->{$pt->{$type}};
+        push(@{$storage_ref}, $data_ref)
+          unless $storage_ref->[$#{$storage_ref}] eq $data_ref;
+        $self->{storage}->{histo}->{$pt->{$type}}++;
+	  }
+	}
+  }
 
-		$store = "txt";
-		if (open(IF, "< " . $tokens->[1])) {
-			local $/;
-			$full_text = <IF>;
-			close(IF);
-		} else {
-            print STDERR "failed to open " . $tokens->[1] . ": $!";
-		}
+  print Dumper($self->{storage}) if $self->{debug};
 
+  #foreach my $t (%{$self->{storage}}) {
+  #  next if ref($t) eq 'HASH';
+  #  print "type: $t\n";
+  #  my @words = keys(%{$self->{storage}->{$t}->{words}});
+  #  for (1..5) {
+  #    print "   " . $words[int(rand($#words))] . "\n";
+  #  }
+  #}
+  return 1;
+}
+
+sub load_file {
+	my ($self, $file) = @_;
+
+    print "loading file: \"$file\"\n" if $self->{debug};
+
+	my $text = "";
+	
+	# sanitize file path
+	if ($file) {
+
+	  if ($file =~ m/^\//g) {
+	    return "no can do buddy-o.";
+	  }
+
+	  # skip non-existant files
+	  return "whatchu talking bout willis." unless (-f $file);
+
+    } else {
+      return "load what?";
+    }
+
+	if (open(IF, "< " . $file)) {
+		local $/;
+		$text = <IF>;
+		close(IF);
 	} else {
-		# it's just a sentence to add
-		$store = $who;
-		$full_text = $msg;
+    	print STDERR "failed to open " . $$file . ": $!";
 	}
  
 	# parse it up, index and store.
@@ -194,50 +246,34 @@ sub load {
 	my %idx_seen = ();
 	my $s = "";
 	my $idx = 0;
-	my @sentences = $self->{'parse_s'}->($full_text);
 
-	# don't know why Lingua::EN:Sentence returns this way, but whatever.
-	foreach $s (@{$sentences[0]}) {
+    $self->store($file, $text) || print STDERR "store failed in load\n";
 
-		# clean up
-		$s =~ s/\ ?\n/\ /g;
-		$s =~ s/\ {2,}/\ /g;
-
-		$tt = $self->{'tagger'}->add_tags($s);
-		$pt = $self->{xmlp}->XMLin("<sentence>$tt</sentence>");
-
-		# add tokenized by occurrence and source
-		push(@{$self->{tokens}->{$store}}, {'raw' => $s, 'parsed' => $pt});
-
-		# create an index of words and the number of times seen and where
-		foreach my $type (keys(%{$pt})) {
-			if (ref($pt->{$type}) eq "ARRAY") {
-
-				for  ($idx =0,$idx <= $#{$pt->{$type}}, $idx++) { 
-					$self->{tokens}->{index}->{$type}->{$pt->{$type}->[$idx]}++;
-				}
-
-			} else {
-				$self->{tokens}->{index}->{$type}->{$pt->{$type}}++;
-			}
-		}
-    }
 	return 1;
 }
 
 sub genGrammticalForm {
 	my ($self) = shift;
 
-	my @forms = [
-		['rb', 'jj', 'nn', 'md', 'jj', 'vbp', 'in'],
-	];
+	my @forms = (
+		['jjr', 'nns', 'to', 'vb', 'to', 'prps', 'cd', 'nns'],
+		['wdt', 'jj', 'nn', 'vbz', 'vbp'],
+		['wrb', 'prps', 'vbz', 'vb', 'nn', 'ppc','vb','in','jj','nn'],
+        ['vb', 'jj', 'nns', 'wdt', 'vb','jjr', 'nns'],
+        ['wp','nns','jjr','in','nns','in','vbz'],
+        ['rb','cd','nns','vb','det','nn','nns','vbp'],
+        ['nns', 'vb','jj','nn','rb'],
+        ['prps', 'jj','nn','vbz','rb','rb'],
+        ['jj','nn','vbz','rb'],
+        ['vbg','to','det','nns','jjr','nns','vbz','jjs']
+	);
 	my @shuffled = shuffle(@forms);
 	return pop(@shuffled);
 
 }
 
 sub DESTROY {
-    my ($self) = shift;
+  my ($self) = shift;
 	my $file = "scramblah.m.out";
 
 	if ($self->{save} != 0) {
